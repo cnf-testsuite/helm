@@ -21,6 +21,6 @@ dependencies:
     version: ~> 1.0.0
   tar:
     github: cnf-testsuite/tar
-    branch: main
+    version: ~> 0.1.0
 
 license: MIT
