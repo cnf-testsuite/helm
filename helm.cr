@@ -142,6 +142,27 @@ module Helm
     [resp[:status].success?, output_file]
   end
 
+  def self.generate_manifest(release_name : String, namespace : String)
+    Log.info { "Generating manifest from installed CNF: #{release_name}" }
+
+    helm = BinarySingleton.helm
+    cmd = "#{helm} get manifest #{release_name} --namespace #{namespace}"
+    Log.info { "helm command: #{cmd}" }
+
+    status = Process.run(cmd, shell: true, output: output = IO::Memory.new, error: stderr = IO::Memory.new)
+    
+    if status.success? && !output.empty?
+      Log.debug { "Helm.manifest output:\n #{output.to_s}" }
+      Log.info { "Manifest was generated successfully" }
+      if !stderr.empty?
+        Log.info { "Helm.manifest stderr: #{stderr.to_s}" }
+      end
+    else
+      raise ManifestGenerationError.new(stderr.to_s)
+    end
+    output.to_s
+  end
+
   def self.workload_resource_by_kind(ymls : Array(YAML::Any), kind : String)
     Log.info { "workload_resource_by_kind kind: #{kind}" }
     Log.debug { "workload_resource_by_kind ymls: #{ymls}" }
@@ -447,4 +468,11 @@ module Helm
       return nil
     end
   end
+
+  class ManifestGenerationError < Exception
+    def initialize(stderr : String)
+      super("✖ ERROR: generating manifest was not successfull.\nHelm stderr --> #{stderr}")
+    end
+  end
+
 end
