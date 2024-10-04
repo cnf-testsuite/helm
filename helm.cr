@@ -386,7 +386,7 @@ module Helm
 
   class ManifestGenerationError < Exception
     def initialize(stderr : String)
-      super("✖ ERROR: generating manifest was not successfull.\nHelm stderr --> #{stderr}")
+      super("Helm stderr: #{stderr}")
     end
   end
 
