@@ -12,19 +12,6 @@ module Helm
   POD="Pod"
   CHART_YAML = "Chart.yaml"
 
-  enum InstallParams
-    InstallMethod
-    ConfigSrc
-    ReleaseName
-  end
-   
-  enum InstallMethod
-    HelmChart
-    HelmDirectory
-    ManifestDirectory 
-    Invalid
-  end
-
   module ShellCmd
     def self.run(cmd, log_prefix, force_output=false)
       Log.info { "#{log_prefix} command: #{cmd}" }
@@ -45,78 +32,6 @@ module Helm
         Log.info { "#{log_prefix} stderr: #{stderr.to_s}" }
       end
       {status: status, output: output.to_s, error: stderr.to_s}
-    end
-  end
-
-  def self.install_method_by_config_src(install_method : InstallMethod, config_src : String) : InstallMethod
-    Log.info { "helm install_method_by_config_src" }
-    Log.info { "config_src: #{config_src}" }
-    helm_chart_file = "#{config_src}/#{Helm::CHART_YAML}"
-    Log.info { "looking for potential helm_chart_file: #{helm_chart_file}: file exists?: #{File.exists?(helm_chart_file)}" }
-
-    if !Dir.exists?(config_src) 
-      Log.info { "install_method_by_config_src helm_chart selected" }
-      InstallMethod::HelmChart
-    elsif File.exists?(helm_chart_file)
-      Log.info { "install_method_by_config_src helm_directory selected" }
-      InstallMethod::HelmDirectory
-    elsif Dir.exists?(config_src) 
-      Log.info { "install_method_by_config_src manifest_directory selected" }
-      InstallMethod::ManifestDirectory
-    else
-      InstallMethod::Invalid
-    end
-  end
-
-  # Utilities for manifest files that are not templates or have been converted already
-  # todo move into own file
-  module Manifest
-    def self.parse_manifest_as_ymls(template_file_name="cnfs/temp_template.yml")
-      Log.info { "parse_manifest_as_ymls template_file_name: #{template_file_name}" }
-      templates = File.read(template_file_name)
-      split_template = templates.split(/(\s|^)---(\s|$)/)
-      ymls = split_template.map { | template |
-        #TODO strip out NOTES
-        YAML.parse(template)
-        # compact seems to have problems with yaml::any
-      }.reject{|x|x==nil}
-      Log.debug { "read_template ymls: #{ymls}" }
-      ymls
-    end
-
-    def self.manifest_ymls_from_file_list(manifest_file_list)
-      ymls = manifest_file_list.map do |x|
-        parse_manifest_as_ymls(x)
-      end
-      ymls.flatten
-    end
-
-    def self.manifest_file_list(manifest_directory, silent=false)
-      Log.info { "manifest_file_list" }
-      Log.info { "manifest_directory: #{manifest_directory}" }
-      if manifest_directory && !manifest_directory.empty? && manifest_directory != "/"
-        cmd = "find #{manifest_directory}/ -name \"*.yml\" -o -name \"*.yaml\""
-        Log.info { cmd }
-        Process.run(
-          cmd,
-          shell: true,
-          output: find_resp = IO::Memory.new,
-          error: find_err = IO::Memory.new
-        )
-        manifests = find_resp.to_s.split("\n").select{|x| x.empty? == false}
-        Log.info { "find response: #{manifests}" }
-        if manifests.size == 0 && !silent
-          raise "No manifest ymls found in the #{manifest_directory} directory!"
-        end
-        manifests
-      else
-        [] of String
-      end
-    end
-
-    def self.manifest_containers(manifest_yml)
-      Log.debug { "manifest_containers: #{manifest_yml}" }
-      manifest_yml.dig?("spec", "template", "spec", "containers")
     end
   end
 
