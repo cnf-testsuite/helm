@@ -58,7 +58,9 @@ def install_local_helm
       Log.for("verbose").debug { "full path?: #{local_helm_full_path}" }
 
       stdout = IO::Memory.new
-      status = Process.run("wget -P #{binary_directory} https://get.helm.sh/helm-v3.8.2-#{Helm::DEFAULT_ARCH}.tar.gz", shell: true,  output: stdout, error: stdout)
+      status = Process.run("wget -P #{binary_directory} https://get.helm.sh/helm-v3.8.2-#{Helm::DEFAULT_ARCH}.tar.gz",
+        shell: true, output: stdout, error: stdout
+      )
 
       unless status.success?
         Log.for("verbose").debug { stdout }
@@ -71,7 +73,7 @@ def install_local_helm
       )
 
       helm = Helm::BinarySingleton.local_helm
-      
+
       status = Process.run("#{helm} version", shell: true, output: stdout, error: stdout)
 
       Log.for("verbose").debug { stdout }
@@ -82,7 +84,7 @@ def install_local_helm
 end
 
 def helm_local_cleanup
-  current_dir = FileUtils.pwd 
+  current_dir = FileUtils.pwd
   path = "#{current_dir}/#{local_helm_path}"
   Log.for("verbose").info { "helm_local_cleanup path: #{path}" }
   FileUtils.rm_rf(path)

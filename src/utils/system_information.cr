@@ -5,7 +5,8 @@ require "kubectl_client"
 require "./utils.cr"
 require "../../helm.cr"
 
-def helm_installation(verbose=false)
+# TODO (rafal-lal): move stdout_ to main cnti testsuite
+def helm_installation(verbose = false)
   gmsg = "No Global helm version found"
   lmsg = "No Local helm version found"
   ghelm = helm_global_response
@@ -28,7 +29,6 @@ def helm_installation(verbose=false)
   if local_helm_version && !local_helm_version.empty?
     lmsg = "Local helm found. Version: #{local_helm_version}"
     stdout_success lmsg
-
   else
     stdout_warning lmsg
   end
@@ -45,29 +45,30 @@ def helm_installation(verbose=false)
   "#{lmsg} #{gmsg}"
 end
 
-def helm_global_response(verbose=false)
+def helm_global_response(verbose = false)
   helm_response = `helm version 2>/dev/null`
   Log.info { helm_response } if verbose
   helm_response
 end
 
-def helm_local_response(verbose=false)
-  result = Helm::ShellCmd.run("#{local_helm_full_path} version", "helm_local_version", force_output: verbose)
+def helm_local_response(verbose = false)
+  result = Helm::ShellCMD.run(
+    "#{local_helm_full_path} version", Helm::Log.for("helm_local_response"), force_output: verbose
+  )
   result[:output]
 end
 
-def helm_version(helm_response, verbose=false)
+def helm_version(helm_response, verbose = false)
   resp = "#{helm_v2_version(helm_response) || helm_v3_version(helm_response)}"
   Log.info { resp } if verbose
   resp
 end
 
-
 def helm_v2_version(helm_response)
   # example
   # Client: &version.Version{SemVer:\"v2.14.3\", GitCommit:\"0e7f3b6637f7af8fcfddb3d2941fcc7cbebb0085\", GitTreeState:\"clean\"}\nServer: &version.Version{SemVer:\"v2.16.1\", GitCommit:\"bbdfe5e7803a12bbdf97e94cd847859890cf4050\", GitTreeState:\"clean\"}
   helm_v2 = helm_response.match /Client: &version.Version{SemVer:\"(v([0-9]{1,3}[\.]){1,2}[0-9]{1,3}).+"/
-  Log.debug {"helm_v2?: #{helm_v2}"}
+  Log.debug { "helm_v2?: #{helm_v2}" }
   helm_v2 && helm_v2.not_nil![1]
 end
 
@@ -79,15 +80,16 @@ def helm_v3_version(helm_response)
   helm_v3 && helm_v3.not_nil![1]
 end
 
-#TODO Get global response for helm
-#TODO Get version number of global response for helm
-#TODO If version of helm not 3 or greater, act as if helm is not installed
-#TODO If version of helm is 3, return helm installed
+# TODO Get global response for helm
+# TODO Get version number of global response for helm
+# TODO If version of helm not 3 or greater, act as if helm is not installed
+# TODO If version of helm is 3, return helm installed
 module Helm
   class SystemInfo
-    def self.helm_installation_info(verbose=false)
+    def self.helm_installation_info(verbose = false)
       helm_installation(verbose)
     end
+
     def self.global_helm_installed?
       ghelm = helm_global_response
       global_helm_version = helm_v3_version(ghelm)
