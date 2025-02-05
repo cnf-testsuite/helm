@@ -3,18 +3,13 @@ require "./src/utils/utils.cr"
 require "./src/utils/binary_reference.cr"
 
 module Helm
-
+  Log             = ::Log.for("helm")
   BinarySingleton = BinaryReference.new
 
-  #TODO move to kubectlclient
-  DEPLOYMENT="Deployment"
-  SERVICE="Service"
-  POD="Pod"
-  CHART_YAML = "Chart.yaml"
-
-  module ShellCmd
-    def self.run(cmd, log_prefix, force_output=false)
-      Log.info { "#{log_prefix} command: #{cmd}" }
+  module ShellCMD
+    # logger should have method name (any other scopes, if necessary) that is calling attached using .for() method.
+    def self.run(cmd, logger : ::Log = Log, force_output = false)
+      logger.debug { "command: #{cmd}" }
       status = Process.run(
         cmd,
         shell: true,
@@ -22,78 +17,74 @@ module Helm
         error: stderr = IO::Memory.new
       )
       if force_output == false
-        Log.debug { "#{log_prefix} output: #{output.to_s}" }
+        logger.debug { "output: #{output.to_s}" }
       else
-        Log.info { "#{log_prefix} output: #{output.to_s}" }
+        logger.info { "output: #{output.to_s}" }
       end
 
       # Don't have to output log line if stderr is empty
       if stderr.to_s.size > 1
-        Log.info { "#{log_prefix} stderr: #{stderr.to_s}" }
+        logger.info { "stderr: #{stderr.to_s}" }
       end
+      # TODO (rafal-lal) instead of returning NamedTuple, return defined struct as returned data is
+      # also used in main cnti_testsuite
       {status: status, output: output.to_s, error: stderr.to_s}
     end
   end
 
   # Use helm to apply the helm values file to the helm chart templates to create a complete manifest
   # Helm uses manifest files that can be jinja templates
-  def self.generate_manifest_from_templates(release_name, helm_chart, output_file="cnfs/temp_template.yml", namespace : String | Nil = nil, helm_values = nil)
+  def self.generate_manifest_from_templates(
+    release_name, helm_chart, output_file = "cnfs/temp_template.yml", namespace : String | Nil = nil, helm_values = nil
+  )
+    logger = Log.for("generate_manifest_from_templates")
+
     # namespace can be an empty string. So verify and set it to nil.
     if !namespace.nil? && namespace.empty?
       namespace = nil
     end
 
-    Log.debug { "generate_manifest_from_templates" }
     helm = BinarySingleton.helm
-    Log.info { "Helm::generate_manifest_from_templates command: #{helm} template #{release_name} #{helm_chart} > #{output_file}" }
 
-    Helm::ShellCmd.run("ls -alR #{helm_chart}", "before generate")
-    Helm::ShellCmd.run("ls -alR cnfs", "before generate")
+    ShellCMD.run("ls -alR #{helm_chart}", logger.for("before generate"))
+    ShellCMD.run("ls -alR cnfs", logger.for("before generate"))
     resp = Helm.template(release_name, helm_chart, output_file, namespace, helm_values)
-    Helm::ShellCmd.run("ls -alR #{helm_chart}", "after generate")
-    Helm::ShellCmd.run("ls -alR cnfs", "after generate")
+    ShellCMD.run("ls -alR #{helm_chart}", logger.for("after generate"))
+    ShellCMD.run("ls -alR cnfs", logger.for("after generate"))
 
-    Log.debug { "generate_manifest_from_templates output_file: #{output_file}" }
     [resp[:status].success?, output_file]
   end
 
   def self.generate_manifest(release_name : String, namespace : String)
-    Log.info { "Generating manifest from installed CNF: #{release_name}" }
+    logger = Log.for("generate_manifest")
+    logger.info { "Generating manifest from installed CNF: #{release_name}" }
 
     helm = BinarySingleton.helm
-    cmd = "#{helm} get manifest #{release_name} --namespace #{namespace}"
-    Log.info { "helm command: #{cmd}" }
 
-    status = Process.run(cmd, shell: true, output: output = IO::Memory.new, error: stderr = IO::Memory.new)
-    
-    if status.success? && !output.empty?
-      Log.debug { "Helm.manifest output:\n #{output.to_s}" }
-      Log.info { "Manifest was generated successfully" }
-      if !stderr.empty?
-        Log.info { "Helm.manifest stderr: #{stderr.to_s}" }
-      end
+    resp = ShellCMD.run("#{helm} get manifest #{release_name} --namespace #{namespace}")
+    if resp[:status].success? && !resp[:output].empty?
+      logger.info { "Manifest was generated successfully" }
     else
-      raise ManifestGenerationError.new(stderr.to_s)
+      raise ManifestGenerationError.new(resp[:error])
     end
-    output.to_s
+    resp[:output]
   end
 
   def self.workload_resource_by_kind(ymls : Array(YAML::Any), kind : String)
-    Log.info { "workload_resource_by_kind kind: #{kind}" }
-    Log.debug { "workload_resource_by_kind ymls: #{ymls}" }
-    resources = ymls.select{|x| x["kind"]?==kind}.reject! {|x|
-        # reject resources that contain the 'helm.sh/hook: test' annotation
-      Log.debug { "x[metadata]?: #{x["metadata"]?}" }
-      Log.debug { "x[metadata][annotations]?: #{x["metadata"]? && x["metadata"]["annotations"]?}" }
-      x.dig?("metadata","annotations","helm.sh/hook")
-      }
-    # end
-    Log.debug { "resources: #{resources}" }
+    logger = Log.for("workload_resource_by_kind")
+    logger.debug { "kind: #{kind}" }
+    logger.debug { "ymls: #{ymls}" }
+
+    resources = ymls.select { |x| x["kind"]? == kind }.reject! { |x|
+      # reject resources that contain the 'helm.sh/hook: test' annotation
+      x.dig?("metadata", "annotations", "helm.sh/hook")
+    }
+
     resources
   end
 
   def self.all_workload_resources(yml : Array(YAML::Any), default_namespace : String = "default") : Array(YAML::Any)
-    resources = KubectlClient::WORKLOAD_RESOURCES.map { |k,v|
+    resources = KubectlClient::WORKLOAD_RESOURCES.map { |k, v|
       Helm.workload_resource_by_kind(yml, v)
     }.flatten
 
@@ -134,7 +125,7 @@ module Helm
     resources_with_namespace = resources.map do |resource|
       ensure_resource_with_namespace(resource, default_namespace)
     end
-    Log.debug { "all resource: #{resources_with_namespace}" }
+    Log.for("all_workload_resources").debug { "#{resources_with_namespace}" }
     resources_with_namespace
   end
 
@@ -167,29 +158,25 @@ module Helm
     end
   end
 
-  def self.workload_resource_names(resources : Array(YAML::Any) )
-    resource_names = resources.map do |x|
-      x["metadata"]["name"]
-    end
-    Log.debug { "resource names: #{resource_names}" }
-    resource_names
-  end
-
-  def self.workload_resource_kind_names(resources : Array(YAML::Any), default_namespace : String = "default") : Array(NamedTuple(kind: String, name: String, namespace: String))
+  def self.workload_resource_kind_names(
+    resources : Array(YAML::Any),
+    default_namespace : String = "default"
+  ) : Array(NamedTuple(kind: String, name: String, namespace: String))
     resource_names = resources.map do |x|
       namespace = (x.dig?("metadata", "namespace") || default_namespace).to_s
       {
-        kind: x["kind"].as_s,
-        name: x["metadata"]["name"].as_s,
-        namespace: namespace
+        kind:      x["kind"].as_s,
+        name:      x["metadata"]["name"].as_s,
+        namespace: namespace,
       }
     end
-    Log.debug { "resource names: #{resource_names}" }
+    Log.for("workload_resource_kind_names").debug { "resource names: #{resource_names}" }
     resource_names
   end
 
   def self.kind_exists?(args, config, kind, default_namespace : String = "default")
-    Log.info { "kind_exists?: #{kind}" }
+    logger = Log.for("kind_exists?")
+    logger.debug { "kind: #{kind}" }
     resource_ymls = CNFManager.cnf_workload_resources(args, config) do |resource|
       resource
     end
@@ -200,60 +187,50 @@ module Helm
     end
     resource_names = Helm.workload_resource_kind_names(resource_ymls, default_namespace: default_namespace)
     found = false
-		resource_names.each do | resource |
+    resource_names.each do |resource|
       if resource[:kind].downcase == kind.downcase
         found = true
       end
     end
-    Log.info { "kind_exists? found: #{found}" }
+    logger.debug { "kind found: #{found}" }
     found
   end
 
   def self.helm_repo_add(helm_repo_name, helm_repo_url)
+    logger = Log.for("helm_repo_add")
+    logger.info { "Adding helm repository: #{helm_repo_name}" }
     helm = BinarySingleton.helm
-    Log.info { "helm_repo_add: helm repo add command: #{helm} repo add #{helm_repo_name} #{helm_repo_url}" }
-    stdout = IO::Memory.new
-    stderror = IO::Memory.new
+
+    resp = nil
     begin
-      process = Process.new("#{helm}", ["repo", "add", "#{helm_repo_name}", "#{helm_repo_url}"], output: stdout, error: stderror)
-      status = process.wait
-      helm_resp = stdout.to_s
-      error = stderror.to_s
-      Log.info { "error: #{error}" }
-      Log.info { "helm_resp (add): #{helm_resp}" }
+      resp = ShellCMD.run("#{helm} repo add #{helm_repo_name} #{helm_repo_url}", logger)
     rescue
-      Log.info { "helm repo add command critically failed: #{helm} repo add #{helm_repo_name} #{helm_repo_url}" }
+      logger.error { "Failed to add helm repository, helm command critically failed" }
     end
+
     # Helm version v3.3.3 gave us a surprise
-    if helm_resp =~ /has been added|already exists/ || error =~ /has been added|already exists/
-      ret = true
+    if resp.nil?
+      return false
     else
-      ret = false
+      return resp[:output] =~ /has been added|already exists/ ||
+        resp[:error] =~ /has been added|already exists/ ? true : false
     end
-    ret
   end
 
-  def self.helm_gives_k8s_warning?(verbose=false)
+  def self.helm_gives_k8s_warning? : {Bool, String?}
+    logger = Log.for("helm_gives_k8s_warning?")
     helm = BinarySingleton.helm
-    stdout = IO::Memory.new
-    stderror = IO::Memory.new
+
     begin
-      process = Process.new("#{helm}", ["list"], output: stdout, error: stderror)
-      status = process.wait
-      helm_resp = stdout.to_s
-      error = stderror.to_s
-      Log.info { "error: #{error}" }
-      Log.info { "helm_resp (add): #{helm_resp}" }
+      resp = ShellCMD.run("#{helm} list", logger)
       # Helm version v3.3.3 gave us a surprise
-      if (helm_resp + error) =~ /WARNING: Kubernetes configuration file is/
-        stdout_failure("For this version of helm you must set your K8s config file permissions to chmod 700") if verbose
-        true
-      else
-        false
+      if (resp[:output] + resp[:error]) =~ /WARNING: Kubernetes configuration file is/
+        return {true, "For this version of helm you must set your K8s config file permissions to chmod 700"}
       end
-    rescue ex
-      stdout_failure("Please use newer version of helm")
-      true
+
+      return {false, nil}
+    rescue
+      return {true, "Please use newer version of helm"}
     end
   end
 
@@ -261,111 +238,82 @@ module Helm
     helm_chart_repo.split("/").last
   end
 
-  def self.template(release_name, helm_chart_or_directory, output_file : String = "cnfs/temp_template.yml", namespace : String | Nil = nil, values : String | Nil = nil)
+  def self.template(release_name, helm_chart_or_directory,
+                    output_file : String = "cnfs/temp_template.yml",
+                    namespace : String? = nil,
+                    values : String? = nil)
+    logger = Log.for("template")
     helm = BinarySingleton.helm
     cmd = "#{helm} template"
-    if namespace != nil
-      cmd = "#{cmd} -n #{namespace}"
-    end
+    cmd = "#{cmd} -n #{namespace}" if namespace != nil
     cmd = "#{cmd} #{release_name} #{values} #{helm_chart_or_directory} > #{output_file}"
 
-    Log.info { "helm command: #{cmd}" }
-    status = Process.run(cmd,
-                         shell: true,
-                         output: output = IO::Memory.new,
-                         error: stderr = IO::Memory.new)
-    Log.info { "Helm.template output: #{output.to_s}" }
-    Log.info { "Helm.template stderr: #{stderr.to_s}" }
-    {status: status, output: output, error: stderr}
+    return ShellCMD.run(cmd, logger)
   end
 
-  def self.install(release_name : String, helm_chart : String, namespace = nil, values = nil)
-    # the way values current work is they are combined with the chart 
-    # (e.g. coredns --values FILENAME.yaml 
-    # or
-    # coredns --set test.value.test=new_value --set test.value.anothertest=new_value)
+  # the way values currently work is they are combined with the chart
+  # (e.g. coredns --values FILENAME.yaml
+  # or
+  # coredns --set test.value.test=new_value --set test.value.anothertest=new_value)
+  def self.install(release_name : String, helm_chart : String, namespace = nil, create_namespace = false, values = nil)
+    logger = Log.for("install")
+    logger.info { "Installing helm chart: #{helm_chart}" }
+    logger.debug { "Values: #{values}" }
 
-    # status = Process.run("#{helm} install #{cli}",
-    #                      shell: true,
-    #                      output: output = IO::Memory.new,
-    #                      error: stderr = IO::Memory.new)
-    install("#{release_name} #{values} #{helm_chart} #{namespace}")
-  end
-
-  def self.install(cli)
     helm = BinarySingleton.helm
-    Log.info { "helm command: #{helm} install #{cli}" }
-    status = Process.run("#{helm} install #{cli}",
-                         shell: true,
-                         output: output = IO::Memory.new,
-                         error: stderr = IO::Memory.new)
-    Log.info { "Helm.install output: #{output.to_s}" }
-    Log.info { "Helm.install stderr: #{stderr.to_s}" }
+    cmd = "#{helm} install #{release_name} #{values} #{helm_chart}"
+    cmd = "#{cmd} -n #{namespace}" if namespace
+    cmd = "#{cmd} --create-namespace" if create_namespace
+    cmd = "#{cmd} #{values}" if values
+    resp = ShellCMD.run(cmd, logger)
 
-    if CannotReuseReleaseNameError.error_text_content_match?(stderr.to_s)
-      raise CannotReuseReleaseNameError.new
-    end
+    raise CannotReuseReleaseNameError.new if CannotReuseReleaseNameError.error_text_content_match?(resp[:error])
 
     # When calling Helm.install. Do not rescue from this error.
     # This helps catch those one-off scenarios when helm install fails
     #
     # Examples:
     # * https://github.com/helm/helm/issues/10285
-    # * Also check platform observability failure in this build - https://github.com/cncf/cnf-testsuite/runs/5308701193?check_suite_focus=true
-    result = InstallationFailed.error_text(stderr.to_s)
-    if result
-      raise InstallationFailed.new("Helm install error: #{result}")
-    end
+    # * Also check platform observability failure in this build -
+    #   https://github.com/cncf/cnf-testsuite/runs/5308701193?check_suite_focus=true
+    raise InstallationFailed.new("Helm install error: #{resp[:error]}") if InstallationFailed.error_text(resp[:error])
 
-    {status: status, output: output, error: stderr}
+    return resp
   end
 
-  def self.uninstall(cli)
+  def self.uninstall(release_name, namespace = nil)
+    logger = Log.for("uninstall")
+    logger.info { "Uninstalling helm chart: #{release_name}" }
+
     helm = BinarySingleton.helm
-    Log.info { "helm command: #{helm} uninstall #{cli}" }
-    status = Process.run("#{helm} uninstall #{cli}",
-                         shell: true,
-                         output: output = IO::Memory.new,
-                         error: stderr = IO::Memory.new)
-    Log.info { "Helm.uninstall output: #{output.to_s}" }
-    Log.info { "Helm.uninstall stderr: #{stderr.to_s}" }
-    {status: status, output: output, error: stderr}
+    cmd = "#{helm} uninstall #{release_name}"
+    cmd = "#{cmd} -n #{namespace}" if namespace
+    return ShellCMD.run(cmd, logger)
   end
 
-  def self.delete(cli)
+  def self.pull(helm_repo_name, helm_chart_name, version = nil, destination = nil, untar = true)
+    logger = Log.for("pull")
+    full_chart_name = "#{helm_repo_name}/#{helm_chart_name}"
+    logger.info { "Pulling helm chart: #{full_chart_name}" }
+
     helm = BinarySingleton.helm
-    Log.info { "helm command: #{helm} delete #{cli}" }
-    status = Process.run("#{helm} delete #{cli}",
-                         shell: true,
-                         output: output = IO::Memory.new,
-                         error: stderr = IO::Memory.new)
-    Log.info { "Helm.install delete: #{output.to_s}" }
-    Log.info { "Helm.install delete: #{stderr.to_s}" }
-    {status: status, output: output, error: stderr}
+    cmd = "#{helm} pull #{full_chart_name}"
+    cmd = "#{cmd} --version" if version
+    cmd = "#{cmd} --untar" if untar
+    cmd = "#{cmd} --destination #{destination}" if destination
+    return ShellCMD.run(cmd, logger)
   end
 
-  def self.pull(cli)
-    helm = BinarySingleton.helm
-    Log.info { "helm command: #{helm} pull #{cli}" }
-    status = Process.run("#{helm} pull #{cli}",
-                         shell: true,
-                         output: output = IO::Memory.new,
-                         error: stderr = IO::Memory.new)
-    Log.info { "Helm.pull output: #{output.to_s}" }
-    Log.info { "Helm.pull stderr: #{stderr.to_s}" }
-    {status: status, output: output, error: stderr}
-  end
+  def self.pull(oci_address, version = nil, destination = nil, untar = true)
+    logger = Log.for("pull")
+    logger.info { "Pulling helm chart from OCI registry: #{oci_address}" }
 
-  def self.fetch(cli)
     helm = BinarySingleton.helm
-    Log.info { "helm command: #{helm} fetch #{cli}" }
-    status = Process.run("#{helm} fetch #{cli}",
-                         shell: true,
-                         output: output = IO::Memory.new,
-                         error: stderr = IO::Memory.new)
-    Log.info { "Helm.fetch output: #{output.to_s}" }
-    Log.info { "Helm.fetch stderr: #{stderr.to_s}" }
-    {status: status, output: output, error: stderr}
+    cmd = "#{helm} pull #{oci_address}"
+    cmd = "#{cmd} --version" if version
+    cmd = "#{cmd} --untar" if untar
+    cmd = "#{cmd} --destination #{destination}" if destination
+    return ShellCMD.run(cmd, logger)
   end
 
   class CannotReuseReleaseNameError < Exception
@@ -389,5 +337,4 @@ module Helm
       super("✖ ERROR: generating manifest was not successfull.\nHelm stderr --> #{stderr}")
     end
   end
-
 end
