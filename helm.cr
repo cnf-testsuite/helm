@@ -9,6 +9,7 @@ module Helm
   module ShellCMD
     # logger should have method name (any other scopes, if necessary) that is calling attached using .for() method.
     def self.run(cmd, logger : ::Log = Log, force_output = false)
+      logger = logger.for("cmd")
       logger.debug { "command: #{cmd}" }
       status = Process.run(
         cmd,
@@ -24,7 +25,7 @@ module Helm
 
       # Don't have to output log line if stderr is empty
       if stderr.to_s.size > 1
-        logger.info { "stderr: #{stderr.to_s}" }
+        logger.warn { "stderr: #{stderr.to_s}" }
       end
       # TODO (rafal-lal) instead of returning NamedTuple, return defined struct as returned data is
       # also used in main cnti_testsuite
@@ -38,6 +39,7 @@ module Helm
     release_name, helm_chart, output_file = "cnfs/temp_template.yml", namespace : String | Nil = nil, helm_values = nil
   )
     logger = Log.for("generate_manifest_from_templates")
+    logger.info { "Generating manifest from template: #{release_name}" }
 
     # namespace can be an empty string. So verify and set it to nil.
     if !namespace.nil? && namespace.empty?
@@ -46,6 +48,7 @@ module Helm
 
     helm = BinarySingleton.helm
 
+    # TODO: do we need to log those 'ls' commands?
     ShellCMD.run("ls -alR #{helm_chart}", logger.for("before generate"))
     ShellCMD.run("ls -alR cnfs", logger.for("before generate"))
     resp = Helm.template(release_name, helm_chart, output_file, namespace, helm_values)
@@ -304,7 +307,9 @@ module Helm
     return ShellCMD.run(cmd, logger)
   end
 
-  def self.pull(oci_address, version = nil, destination = nil, untar = true)
+  # This method could be overloaded but there is a trap - if calling this method without all args provided,
+  # to make use of default values for them, both method could be easily matched.
+  def self.pull_oci(oci_address, version = nil, destination = nil, untar = true)
     logger = Log.for("pull")
     logger.info { "Pulling helm chart from OCI registry: #{oci_address}" }
 
