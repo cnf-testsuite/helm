@@ -2,7 +2,6 @@ require "kubectl_client"
 require "./src/utils/utils.cr"
 require "./src/utils/binary_reference.cr"
 
-# RLTODO: raise exceptions like in kubectl_client
 module Helm
   Log = ::Log.for("Helm")
 
@@ -33,6 +32,18 @@ module Helm
 
       {status: status, output: output.to_s, error: stderr.to_s}
     end
+
+    def self.raise_exc_on_error(&)
+      result = yield
+      # TODO: raise different kind of exceptions based on type of error (network issue, resource does not exits etc.)
+      unless result[:status].success?
+        raise HelmCMDException.new(result[:error])
+      end
+      result
+    end
+
+    class HelmCMDException < Exception
+    end
   end
 
   def self.generate_manifest(release_name : String, namespace : String) : String
@@ -41,7 +52,7 @@ module Helm
 
     helm = BinarySingleton.helm
 
-    resp = ShellCMD.run("#{helm} get manifest #{release_name} --namespace #{namespace}")
+    resp = ShellCMD.raise_exc_on_error { ShellCMD.run("#{helm} get manifest #{release_name} --namespace #{namespace}") }
     if resp[:status].success? && !resp[:output].empty?
       logger.info { "Manifest was generated successfully" }
     else
@@ -183,7 +194,7 @@ module Helm
 
     resp = nil
     begin
-      resp = ShellCMD.run("#{helm} repo add #{helm_repo_name} #{helm_repo_url}", logger)
+      resp = ShellCMD.raise_exc_on_error { ShellCMD.run("#{helm} repo add #{helm_repo_name} #{helm_repo_url}", logger) }
     rescue
       logger.error { "Failed to add helm repository, helm command critically failed" }
     end
@@ -202,7 +213,7 @@ module Helm
     helm = BinarySingleton.helm
 
     begin
-      resp = ShellCMD.run("#{helm} list", logger)
+      resp = ShellCMD.raise_exc_on_error { ShellCMD.run("#{helm} list", logger) }
       # Helm version v3.3.3 gave us a surprise
       if (resp[:output] + resp[:error]) =~ /WARNING: Kubernetes configuration file is/
         return {true, "For this version of helm you must set your K8s config file permissions to chmod 700"}
@@ -228,7 +239,7 @@ module Helm
     cmd = "#{cmd} -n #{namespace}" if namespace != nil
     cmd = "#{cmd} #{release_name} #{values} #{helm_chart_or_directory} > #{output_file}"
 
-    ShellCMD.run(cmd, logger)
+    ShellCMD.raise_exc_on_error { ShellCMD.run(cmd, logger) }
   end
 
   # the way values currently work is they are combined with the chart
@@ -247,7 +258,7 @@ module Helm
     cmd = "#{cmd} -n #{namespace}" if namespace
     cmd = "#{cmd} --create-namespace" if create_namespace
     cmd = "#{cmd} #{values}" if values
-    resp = ShellCMD.run(cmd, logger)
+    resp = ShellCMD.raise_exc_on_error { ShellCMD.run(cmd, logger) }
 
     raise CannotReuseReleaseNameError.new if CannotReuseReleaseNameError.error_text_content_match?(resp[:error])
 
@@ -270,7 +281,7 @@ module Helm
     helm = BinarySingleton.helm
     cmd = "#{helm} uninstall #{release_name}"
     cmd = "#{cmd} -n #{namespace}" if namespace
-    ShellCMD.run(cmd, logger)
+    ShellCMD.raise_exc_on_error { ShellCMD.run(cmd, logger) }
   end
 
   def self.pull(helm_repo_name, helm_chart_name, version = nil, destination = nil, untar = true) : CMDResult
@@ -283,7 +294,7 @@ module Helm
     cmd = "#{cmd} --version" if version
     cmd = "#{cmd} --untar" if untar
     cmd = "#{cmd} --destination #{destination}" if destination
-    ShellCMD.run(cmd, logger)
+    ShellCMD.raise_exc_on_error { ShellCMD.run(cmd, logger) }
   end
 
   # This method could be overloaded but there is a trap - if calling this method without all args provided,
@@ -297,7 +308,7 @@ module Helm
     cmd = "#{cmd} --version" if version
     cmd = "#{cmd} --untar" if untar
     cmd = "#{cmd} --destination #{destination}" if destination
-    ShellCMD.run(cmd, logger)
+    ShellCMD.raise_exc_on_error { ShellCMD.run(cmd, logger) }
   end
 
   class CannotReuseReleaseNameError < Exception
