@@ -75,10 +75,7 @@ module Helm
   end
 
   def self.all_workload_resources(yml : Array(YAML::Any), default_namespace : String = "default") : Array(YAML::Any)
-    resources = KubectlClient::WORKLOAD_RESOURCES.flat_map do |_, v|
-      Helm.workload_resource_by_kind(yml, v)
-    end
-
+    resources = KubectlClient::WORKLOAD_RESOURCES.map { |_, v| Helm.workload_resource_by_kind(yml, v) }.flatten
     # This patch works around a Helm behaviour https://github.com/helm/helm/issues/10737
     #
     # The below map block inserts "metadata.namespace" key into resources that do not specify a namespace.
@@ -247,7 +244,7 @@ module Helm
   # or
   # coredns --set test.value.test=new_value --set test.value.anothertest=new_value)
   def self.install(
-    release_name : String, helm_chart : String, namespace = nil, create_namespace = false, values = nil
+    release_name : String, helm_chart : String, namespace : String? = nil, create_namespace = false, values = nil
   ) : CMDResult
     logger = Log.for("install")
     logger.info { "Installing helm chart: #{helm_chart}" }
