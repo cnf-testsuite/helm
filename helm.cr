@@ -35,14 +35,32 @@ module Helm
 
     def self.raise_exc_on_error(&)
       result = yield
-      # TODO: raise different kind of exceptions based on type of error (network issue, resource does not exits etc.)
       unless result[:status].success?
-        raise HelmCMDException.new(result[:error])
+        # Add new cases to this switch if needed
+        case
+        when /#{RELEASE_NOT_FOUND}/.match(result[:error])
+          raise ReleaseNotFound.new(result[:error], result[:status].exit_code)
+        when /#{REPO_NOT_FOUND}/i.match(result[:error])
+          raise RepoNotFound.new(result[:error], result[:status].exit_code)
+        else
+          raise HelmCMDException.new(result[:error], result[:status].exit_code)
+        end
       end
       result
     end
 
     class HelmCMDException < Exception
+      MSG_TEMPLATE = "helm CMD failed, exit code: %s, error: %s"
+
+      def initialize(message : String?, exit_code : Int32, cause : Exception? = nil)
+        super(MSG_TEMPLATE % {exit_code, message}, cause)
+      end
+    end
+
+    class ReleaseNotFound < HelmCMDException
+    end
+
+    class RepoNotFound < HelmCMDException
     end
   end
 
@@ -192,8 +210,8 @@ module Helm
     resp = nil
     begin
       resp = ShellCMD.raise_exc_on_error { ShellCMD.run("#{helm} repo add #{helm_repo_name} #{helm_repo_url}", logger) }
-    rescue
-      logger.error { "Failed to add helm repository, helm command critically failed" }
+    rescue ex : ShellCMD::RepoNotFound
+      logger.error { "Failed to add helm repository, exception msg: #{ex.message}" }
     end
 
     # Helm version v3.3.3 gave us a surprise
