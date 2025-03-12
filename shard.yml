@@ -18,8 +18,7 @@ dependencies:
     version: ~> 0.7.0
   kubectl_client:
     github: cnf-testsuite/kubectl_client
-    branch: rlal-refactor-k8sclient-module
-    # version: ~> 1.0.0
+    version: ~> 1.0.8
   tar:
     github: cnf-testsuite/tar
     branch: main
